@@ -1,5 +1,4 @@
 #ifndef MAIN_H__
-
 #define MAIN_H__
 
 #include <stdio.h>
@@ -11,12 +10,16 @@
 #include <time.h>
 #include <locale.h>
 
-#define MXA_SIZE    256
-
+#define PHONE_NUM	32
+#define MXA_SIZE    512
+#define LIMIT_SIZE  66*2
+#define LIMIT_7BIT  152
 #define GSM_7BIT    0x00
 #define GSM_8BIT    0x04
 #define GSM_UNICODE 0x08
+#define perror(txt); {printf("%s(%d):%s", __FUNCTION__, __LINE__, txt);}
 typedef unsigned char uchar;
+
 typedef struct
 {
 	uchar year;
@@ -30,15 +33,20 @@ typedef struct
 
 typedef struct gsmtp_t
 {
+	int merge_num;
+	char pdu_mti;
+	uchar merge_flag[2];
+	int merge_end;
 	uchar tppid;
 	uchar tpdcs;
-	uchar tplongth;
+	int tplongth;
 	uchar tp_udhi;
-
-	uchar  tpdata[256];
+	uchar *tpdata[PHONE_NUM];
+	uchar *result_data;
 	timp timestamp;
-	uchar smsc[16];
-	uchar rete[16];
+	uchar smsc[PHONE_NUM];
+	uchar rete[PHONE_NUM];
+	uchar udli_data[PHONE_NUM/2];
 }gsmtp;
 
 /********7bit***********/
@@ -57,7 +65,7 @@ static int gsmdecode_unic(uchar* src,uchar *dst, int length);
 static int gsmstring_byte(uchar *src, uchar *dst, int length);
 static int gsmbyte_string(uchar *src, uchar *dst, int length);
 
-/**********unicª*********/
+/**********unica*********/
 static int gsmby_normal(uchar *src,uchar *dst,int length);
 static int gsmto_normal(uchar* src,uchar *dst, int length)  ;
 
@@ -68,5 +76,4 @@ int gsmdecodepdu(uchar *src,gsmtp *gsm_data);
 static void stamp_check(uchar *src, const struct tm *p);
 static int conversion(uchar nsrc);
 static void gsm_error(uchar *src);
-
-#endif // MAIN_H__
+#endif

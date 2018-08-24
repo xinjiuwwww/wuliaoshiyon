@@ -3,25 +3,25 @@
 函数：gsmcode7bit()
 用7bit编码方式编码pdu消息
 ************************************/
+
 static int gsmcode_7bit(uchar* src,uchar  *dst,int length)
 {
     int num;
-    int i;
+    int i,j;
     uchar left_num;
-    for(i = 0;i <= length;i++)
+    for(i = 0,j = 0;i <=length;i++)
     {
-       num  = i % 7;
+       num  = i & 7;
        if(num == 0)
             left_num = src[i];
        else{
-        dst[i] = src[i] <<(8-num) | left_num;
+        dst[j] = src[i] <<(8-num) | left_num;
+        j++;
         left_num = src[i] >> num;
        }
     }
-    if(i % 7 != 0)
-        dst[i++] = left_num;
-    dst[i] = '\0';
-    return i;
+
+    return j;
 }
 /**********************************
 函数：gsmdecode7bit()
@@ -58,6 +58,7 @@ static int gsmdecode_7bit( uchar *src,uchar *dst, int length)
     dst[dst_num] = 0;
     return dst_num;
 }
+
 /**********************************
 函数：gsmcode_8bit()
 以8bit的编码方式编码pdu消息
@@ -88,17 +89,19 @@ static int gsmcode_unic(uchar* src,uchar *dst, int length)
 {
     int length_dst;
     int i,j;
+
     wchar_t pwc[MXA_SIZE] = {'\0'};
     setlocale(LC_ALL, "chs");
-    length_dst = mbstowcs (pwc,(const char *)src,length);
+
+    length_dst = mbstowcs(pwc,(const char *)src,length);
 //    wprintf(pwc);
     for(i = 0,j = 0;i < length_dst;i++)
     {
         dst[j++] = pwc[i] >> 8;
         dst[j++] = pwc[i] & 0xff;
     }
-//    printf("%s\n",dst);
-    return length_dst;
+    setlocale( LC_ALL, "C" );
+    return length_dst*2;
 }
 
 /**********************************
@@ -107,20 +110,20 @@ static int gsmcode_unic(uchar* src,uchar *dst, int length)
 ************************************/
 static int gsmdecode_unic(uchar* src,uchar *dst, int length)
 {
+    wchar_t pwc[MXA_SIZE] = {'\0'};
     size_t i,j;
     size_t length_dst;
-    wchar_t pwc[MXA_SIZE];
     setlocale(LC_ALL, "chs");
-//     printf("%s\n",src);
     for(i = 0,j = 0;i < length;i++)
     {
         pwc[i] = src[j++] << 8;
         pwc[i] = src[j++] | pwc[i];
     }
+    memset(dst,0,MXA_SIZE);
     length_dst = wcstombs((char *)dst,(const wchar_t *)pwc,i);
     dst[length_dst] = '\0';
-//    printf("%s\n",dst);
- //  wprintf(pwc);
+ //   printf("%s\n",dst);
+    setlocale( LC_ALL, "C" );
     return 0;
 }
 
@@ -132,7 +135,7 @@ static int gsmbyte_string(uchar *src, uchar *dst, int length)
 {
     int i;
     char table[] = "0123456789ABCDEF";
-    for(i = 0;i < length * 2;i += 2)
+    for(i = 0;i < length ;i ++)
     {
         *dst++ = table[*src >> 4];
     //  *dst++ = table[(*src << 4) >> 4]; 为什么这样有问题呢？？？
@@ -140,7 +143,7 @@ static int gsmbyte_string(uchar *src, uchar *dst, int length)
         src++;
     }
     *dst = '\0';
-    return i;
+    return i*2;
 }
 
 /********************************
@@ -233,54 +236,237 @@ int gsmcodepdu(uchar *dst, gsmtp *src)
 {
     int length = 0;
     int length_dst = 0;
+    int ntmp = 0;
+    uchar *aaa = NULL ;
+    uchar temp[20] = {'\0'};
     uchar buf[MXA_SIZE] = {'\0'};
-    uchar arr[MXA_SIZE] = {'\0'};
+    uchar arr[MXA_SIZE*8] = {'\0'};
+    if(src->tp_udhi == 1);
+    else if(strlen((const char *)src->result_data) > LIMIT_SIZE)
+    {
+        src->tplongth = strlen((const char *)src->result_data);
+        src->tp_udhi = 1;
+    }
     length = strlen((const char*)src->smsc);
     if((length & 1) == 0)
         buf[0] = (char )length / 2 + 1;
     else
         buf[0] =  (char )(length+1) / 2 + 1;
-    buf[1] = (char)0x91;
-    length_dst = gsmbyte_string(buf,dst,2);
-    length = gsmby_normal(src->smsc, buf,length);
-    strcat((char *)dst,(const char *)buf);
-    length_dst += length;
-    buf[0] = 0x11; //发送模式
-    buf[1] = 0;
-      length = strlen((const char *)src->rete);
-    if((length & 1)== 0)
-        buf[2] = length / 2 + 1;
+    if(src->smsc[0] == '+')
+    {
+        length--;
+        buf[1] = (char)0x91;
+        memcpy(temp,&src->smsc[1],length);
+    }
+    else{
+        buf[1] = (char)0xA0;
+        memcpy(temp,src->smsc,length);
+    }
+    length_dst += gsmbyte_string(buf,dst,2);
+    length_dst += gsmby_normal(temp, &dst[length_dst],length);
+    if(src->tp_udhi == 1)
+        buf[0] = 0x51; //发送模式
     else
-        buf[2] =  (length+1) / 2 + 1;
-    buf[3] = 0x91;
+        buf[0] = 0x11;
+    buf[1] = 0;
+    length = strlen((const char *)src->rete);
+    if(src->rete[0] == '+')
+    {
+        buf[2] = length-1;
+        length--;
+        buf[3] = (char)0x91;
+        memcpy(temp,&src->rete[1],length);
+    }
+    else
+    {
+        buf[2] = length;
+        buf[3] = (char)0xA0;
+        memcpy(temp,src->rete,length);
+    }
 
     length_dst += gsmbyte_string(buf,&dst[length_dst],4);
-    length_dst += gsmby_normal(src->rete,&dst[length_dst],length);
-
+    length_dst += gsmby_normal(temp,&dst[length_dst],length);
     length_dst += gsmbyte_string(&src->tppid,&dst[length_dst],1);
     length_dst += gsmbyte_string(&src->tpdcs,&dst[length_dst],1);
     buf[0] = 0;
-    length = strlen((const char *)src->tpdata);
+    if(src->tp_udhi == 1)
+    {
+        if(src->merge_end == 0)
+            src->merge_num++;
+        src->merge_end++;
+        if(src->tpdcs == GSM_7BIT)
+        {
 
-    buf[1] = length;
- //   printf("length:::%x\n",length);
- //   sprintf(&buf[1],"%d",length);
-//    printf("buf:::%x\n",buf[1]);
-    length_dst += gsmbyte_string(buf,&dst[length_dst],2);
-    if(src->tpdcs == GSM_7BIT)
-    {
-        length = gsmcode_7bit(src->tpdata,arr,(int)buf[1]-1);
-        gsmbyte_string(arr,&dst[length_dst],length);
+            ntmp = strlen((const char *)src->result_data);
+            if(src->merge_flag[0] == '5')
+            {
+            	if (ntmp - (src->merge_end-1)* LIMIT_7BIT  > LIMIT_7BIT)
+                length = LIMIT_7BIT+7;
+                else if(src->merge_end == src->merge_num)
+                length = ntmp - (src->merge_end-1) * LIMIT_7BIT + 7;
+            }
+            else if(src->merge_flag[0] == '6')
+            {
+                if(src->merge_end == 1 && src->merge_end != src->merge_num)
+                length = LIMIT_7BIT+8;
+                else if(src->merge_end == src->merge_num)
+                length = ntmp - (src->merge_end-1) * LIMIT_7BIT + 8;
+            }
+
+            buf[1] = length;
+            length_dst += gsmbyte_string(buf,&dst[length_dst],2);
+            buf[0] = 0x05;
+            buf[1] = 0x00;
+            buf[2] = 0x03;
+            buf[3] = ntmp % 0xff;
+            if(src->merge_num-1 == 0)
+            {
+                aaa = (uchar *)malloc(sizeof(uchar) * ntmp * 2);
+				memset(aaa, '\0', sizeof(uchar) * ntmp * 2);
+				if(src->merge_flag[0] == '5')
+                {
+                    while( ntmp > LIMIT_7BIT)
+                    {
+                        src->tpdata[src->merge_num-1] = aaa + (src->merge_num-1)*LIMIT_7BIT*2;
+                        src->tpdata[src->merge_num-1][0] = *(src->result_data+(src->merge_num-1) *LIMIT_7BIT) << 1;
+
+                        gsmcode_7bit(src->result_data+(src->merge_num-1) *LIMIT_7BIT + 1,&src->tpdata[src->merge_num-1][1],LIMIT_7BIT-1);
+                        ntmp -= LIMIT_7BIT;
+                        src->merge_num++;
+                    }
+                    if(src->merge_num == 1)
+                    {
+                        arr[0] = src->result_data[0] << 1;
+                        length = gsmcode_7bit(src->result_data+1,&arr[1],ntmp);
+                        buf[4] = src->merge_num;
+                        buf[5] = src->merge_end;
+                        length_dst += gsmbyte_string(buf,&dst[length_dst],6);
+                        gsmbyte_string(arr,&dst[length_dst],length);
+                        return 0;
+                    }
+                    else {
+                        src->tpdata[src->merge_num] = aaa + src->merge_num*LIMIT_7BIT*2;
+                        src->tpdata[src->merge_num][0] = *(src->result_data+(src->merge_num) *LIMIT_7BIT) << 1;
+                        gsmcode_7bit(src->result_data+(src->merge_num - 1) *LIMIT_7BIT + 1,&src->tpdata[src->merge_num - 1][1],ntmp - LIMIT_7BIT*(src->merge_num-1) - 1);
+                    }
+                    buf[4] = src->merge_num;
+                    buf[5] = src->merge_end;
+                    length_dst += gsmbyte_string(buf,&dst[length_dst],6);
+                    gsmbyte_string(src->tpdata[src->merge_end - 1],&dst[length_dst],src->merge_end < src->merge_num ? LIMIT_7BIT : ntmp - LIMIT_7BIT*(src->merge_num-1));
+                }
+                if(src->merge_flag[0] == '6')
+                {
+                    while( ntmp > LIMIT_7BIT)
+                    {
+                        src->tpdata[src->merge_num-1] = aaa + (src->merge_num-1)*LIMIT_7BIT*2;
+                        gsmcode_7bit(src->result_data+(src->merge_num-1) *LIMIT_7BIT ,src->tpdata[src->merge_num-1],LIMIT_7BIT);
+                        ntmp -= LIMIT_7BIT;
+                        src->merge_num++;
+                    }
+                    if(src->merge_num == 1)
+                    {
+                        length = gsmcode_7bit(src->result_data+1,arr,ntmp);
+                        buf[4] = src->merge_num;
+                        buf[5] = src->merge_end;
+                        length_dst += gsmbyte_string(buf,&dst[length_dst],6);
+                        gsmbyte_string(arr,&dst[length_dst],length-1);
+                        return 0;
+                    }
+                    else {
+                        src->tpdata[src->merge_num] = aaa + src->merge_num*LIMIT_7BIT*2;
+                        gsmcode_7bit(src->result_data+(src->merge_num-1) *LIMIT_7BIT ,src->tpdata[src->merge_num-1],ntmp - LIMIT_7BIT*(src->merge_num-1));
+                    }
+                    buf[4] = src->merge_num;
+                    buf[5] = src->merge_end;
+                    length_dst += gsmbyte_string(buf,&dst[length_dst],6);
+                    gsmbyte_string(src->tpdata[src->merge_end - 1],&dst[length_dst],src->merge_end < src->merge_num ? LIMIT_7BIT : ntmp - LIMIT_7BIT*(src->merge_num-1));
+                }
+            }
+        }
+        else if(src->tpdcs == GSM_8BIT)
+        {
+            if(src->merge_end == 1)
+                length = LIMIT_SIZE;
+            else if(src->merge_end == src->merge_num)
+                length = src->tplongth - (src->merge_end-1) * LIMIT_SIZE;
+            buf[1] = length+6;
+            length_dst += gsmbyte_string(buf,&dst[length_dst],2);
+            buf[0] = 0x05;
+            buf[1] = 0x00;
+            buf[2] = 0x03;
+            buf[3] = src->tplongth % 0xff;
+            if(src->merge_num == 0)
+            {
+                src->tplongth = strlen((const char *)src->result_data);
+                ntmp = src->tplongth;
+                while( ntmp > LIMIT_SIZE)
+                {
+                    ntmp -= LIMIT_SIZE;
+                    src->merge_num++;
+                }
+                src->merge_num++;
+            }
+            buf[4] = src->merge_num;
+            buf[5] = src->merge_end;
+            length_dst += gsmbyte_string(buf,&dst[length_dst],6);
+            length = gsmcode_8bit(src->result_data +((src->merge_end-1)*LIMIT_SIZE),arr,src->merge_end < src->\
+                                  merge_num? LIMIT_SIZE :src->tplongth - (src->merge_end-1) * LIMIT_SIZE);
+            gsmbyte_string(arr,&dst[length_dst],length);
+        }
+        else if(src->tpdcs == GSM_UNICODE)
+        {
+
+            ntmp = gsmcode_unic(src->result_data,arr,strlen((const char *)src->result_data));
+            if(src->merge_end == 1 ||src->merge_end != src->merge_num)
+            length = LIMIT_SIZE;
+            else if(src->merge_end == src->merge_num)
+                length = ntmp - (src->merge_end-1) * LIMIT_SIZE;
+            buf[1] = length+6;
+            length_dst += gsmbyte_string(buf,&dst[length_dst],2);
+            buf[0] = 0x05;
+            buf[1] = 0x00;
+            buf[2] = 0x03;
+            buf[3] = src->tplongth % 0xff;
+
+            if(src->merge_num-1 == 0)
+            {
+                aaa = (uchar *)malloc(sizeof(uchar) * ntmp*3);
+                memset(aaa,'\0',sizeof(uchar) * ntmp*3);
+                while( ntmp > LIMIT_SIZE*src->merge_num)
+                {
+                    src->tpdata[src->merge_num-1] = aaa + (src->merge_num-1)*LIMIT_SIZE*2;
+                    gsmbyte_string(arr+(src->merge_num-1)*LIMIT_SIZE,src->tpdata[src->merge_num-1],LIMIT_SIZE);
+                    src->merge_num++;
+                }
+                src->tpdata[src->merge_num - 1 ] = aaa + (src->merge_num-1)*LIMIT_SIZE*2;
+                gsmbyte_string(arr+(src->merge_num-1)*LIMIT_SIZE,src->tpdata[src->merge_num-1],ntmp - (src->merge_num-1) * LIMIT_SIZE);
+                //free(aaa);
+            }
+            buf[4] = src->merge_num;
+            buf[5] = src->merge_end;
+            length_dst += gsmbyte_string(buf,&dst[length_dst],6);
+            memcpy(&dst[length_dst],src->tpdata[src->merge_end-1],src->merge_end < src->merge_num ? LIMIT_SIZE*2 : (ntmp - (src->merge_end - 1) * LIMIT_SIZE)*2);
+        }
     }
-    else if(src->tpdcs == GSM_8BIT)
-    {
-        length = gsmcode_8bit(src->tpdata,arr,(int)buf[1]-1);
-        gsmbyte_string(arr,&dst[length_dst],length);
-    }
-    else if(src->tpdcs == GSM_UNICODE)
-    {
-        length = gsmcode_unic(src->tpdata,arr,(int)buf[1]-1);
-        gsmbyte_string(arr,&dst[length_dst],length);
+    else{
+        ntmp = strlen((const char *)src->result_data);
+        buf[1] = ntmp;
+        length_dst += gsmbyte_string(buf,&dst[length_dst],2);
+        if(src->tpdcs == GSM_7BIT)
+        {
+            length = gsmcode_7bit(src->result_data,arr,ntmp);
+            gsmbyte_string(arr,&dst[length_dst],length);
+        }
+        else if(src->tpdcs == GSM_8BIT)
+        {
+            length = gsmcode_8bit(src->result_data,arr,ntmp);
+            gsmbyte_string(arr,&dst[length_dst],length);
+        }
+        else if(src->tpdcs == GSM_UNICODE)
+        {
+            length = gsmcode_unic(src->result_data,arr,ntmp);
+            gsmbyte_string(arr,&dst[length_dst],length);
+        }
     }
     return length_dst;
 }
@@ -291,116 +477,272 @@ int gsmcodepdu(uchar *dst, gsmtp *src)
 
 int gsmdecodepdu(uchar *src, gsmtp *gsm_data)
 {
-    uchar tmp;
-    uchar ntmp;
-    uchar length;
-  //  unsigned char ncheap;
-    int length_dst;
+	uchar  index = 0;
+    uchar  tmp = 0;
+    int ntmp = 0;
+    int length = 0;
+    uchar phone_flag = 0;
+  // unsigned char ncheap;
+    int length_dst = 0;
     uchar buf[MXA_SIZE] = {'\0'};
     uchar arr[MXA_SIZE] = {'\0'};
 
     gsmstring_byte(src,&tmp,2);
-    src += 4;
-
     tmp = (tmp -1) * 2;
-    length = gsmto_normal(src,buf,tmp);
-    gsm_data->smsc[0] = '+';
-    strncat((char *)gsm_data->smsc,(const char *)buf,length);
-
-    src += tmp ;
-    gsmstring_byte(src,&tmp,2);
+    src += 2;
+    gsmstring_byte(src,&phone_flag,2);
     src += 2;
 
-    gsm_data->tp_udhi = tmp & 0x40;
+    length = gsmto_normal(src,buf,tmp);
+    if(gsm_data->merge_end == 0)
+    {
+        if(!(phone_flag & 0x20))
+        {
+            gsm_data->smsc[0] = '+';
+            strncat((char *)(&gsm_data->smsc[1]),(const char *)buf,length);
+        }
+        else
+            strncat((char *)gsm_data->smsc,(const char *)buf,length);
+    }
+    src += tmp ;
+    gsmstring_byte(src,&tmp,2);
+    gsm_data->pdu_mti = tmp & 0x01;
+    printf("%d\n",gsm_data->pdu_mti);
 
+    gsm_data->tp_udhi = (tmp & 0x40) >> 6;
+    if(gsm_data->pdu_mti)
+        src += 4;
+    else
+        src += 2;
     gsmstring_byte(src,&tmp,2);
     if(tmp & 1)
         tmp += 1;
 
-    src += 4;
+    src += 2;
+    gsmstring_byte(src,&phone_flag,2);
+    src += 2;
     length = gsmto_normal(src,buf,tmp);
-    gsm_data->rete[0] = '+';
-    strncat((char *)gsm_data->rete,(const char *)buf,length);
-
+    if(gsm_data->merge_end == 0)
+    {
+        if(!(phone_flag & 0x20))
+        {
+            gsm_data->rete[0] = '+';
+            strncat((char *)(&gsm_data->rete[1]),(const char *)buf,length);
+        }
+        else
+            strncat((char *)gsm_data->rete,(const char *)buf,length);
+    }
     src += tmp;
 
     gsmstring_byte(src,&tmp,2);
-  gsm_data->tppid = tmp ;
+    gsm_data->tppid = tmp ;
     src += 2;
 
     gsmstring_byte(src,&tmp,2);
     gsm_data->tpdcs = tmp;
     src += 2;
-    gsmto_normal(src,buf,14);
-
-    gsmstring_byte(buf,&gsm_data->timestamp.year,2);
-    gsmstring_byte(buf+2,&gsm_data->timestamp.mouth,2);
-    gsmstring_byte(buf+4,&gsm_data->timestamp.day,2);
-    gsmstring_byte(buf+6,&gsm_data->timestamp.hour,2);
-    gsmstring_byte(buf+8,&gsm_data->timestamp.minu,2);
-    gsmstring_byte(buf+10,&gsm_data->timestamp.sec,2);
-    gsmstring_byte(buf+12,&gsm_data->timestamp.timz,2);
-    src += 14;
+    if(gsm_data->pdu_mti == 0)
+    {
+        gsmto_normal(src,buf,14);
+        gsmstring_byte(buf,&gsm_data->timestamp.year,2);
+        gsmstring_byte(buf+2,&gsm_data->timestamp.mouth,2);
+        gsmstring_byte(buf+4,&gsm_data->timestamp.day,2);
+        gsmstring_byte(buf+6,&gsm_data->timestamp.hour,2);
+        gsmstring_byte(buf+8,&gsm_data->timestamp.minu,2);
+        gsmstring_byte(buf+10,&gsm_data->timestamp.sec,2);
+        gsmstring_byte(buf+12,&gsm_data->timestamp.timz,2);
+        gsm_data->timestamp.year = conversion(gsm_data->timestamp.year);
+        gsm_data->timestamp.mouth = conversion(gsm_data->timestamp.mouth);
+        gsm_data->timestamp.day = conversion(gsm_data->timestamp.day);
+        gsm_data->timestamp.hour = conversion(gsm_data->timestamp.hour);
+        gsm_data->timestamp.minu = conversion(gsm_data->timestamp.minu);
+        gsm_data->timestamp.sec = conversion(gsm_data->timestamp.sec);
+        gsm_data->timestamp.timz = conversion(gsm_data->timestamp.timz) - 24;
+        src += 14;
+    }
+    else
+        src += 2;
     gsmstring_byte(src,&tmp,2);
     ntmp = tmp;
-    gsm_data->tplongth = ntmp;
     src += 2;
+
     if(gsm_data -> tp_udhi )
     {
-        gsmstring_byte(src,&tmp,2);
-        tmp = tmp + 1;
-        src += tmp * 2;
-        if(gsm_data->tpdcs == GSM_7BIT)
-        {
-            gsmstring_byte(src,&tmp,2);
-            tmp = tmp >> 1;
-            arr[0] = tmp;
-            src += 2;
-            memset(buf,0,MXA_SIZE);
-            length_dst = gsmstring_byte(src,buf,(ntmp * 2 / 8) * 7 - 14);
-            gsmdecode_7bit(buf,arr+1,length_dst);
-            memset(gsm_data->tpdata,0,length_dst);
-            memcpy(gsm_data->tpdata,arr,sizeof(arr));
-        }
-        else if(gsm_data->tpdcs == GSM_8BIT)
-        {
-            length_dst = gsmstring_byte(src,buf,(ntmp  - 12));
-            memset(gsm_data->tpdata,0,length_dst);
-            gsmdecode_8bit(buf,gsm_data->tpdata,length_dst);
-        }
-        else if(gsm_data->tpdcs == GSM_UNICODE)
-        {
-            length_dst = gsmstring_byte(src,buf,(ntmp * 2 - 12));
-            memset(gsm_data->tpdata,0,length_dst);
-            gsmdecode_unic(buf,gsm_data->tpdata,length_dst);
-        }
+      	gsmstring_byte(src,&tmp,2);
+      	memcpy(gsm_data->udli_data,src,(tmp+1)*2);
+	  	if(tmp == 0x05)
+	  	{
+			src += 6;
+			gsmstring_byte(src,&tmp,2);
+			if(gsm_data->merge_flag[0] == '\0')
+			{
+                gsm_data->merge_end = 0;
+				gsm_data->merge_flag[0] = tmp;
+				src += 2;
+				gsmstring_byte(src,&tmp,2);
+				gsm_data->merge_num= tmp;
+				src += 2;
+				gsmstring_byte(src,&index,2);
+				index--;
+				gsm_data->tpdata[index] = (uchar *)malloc(sizeof(uchar)*MXA_SIZE);
+				if(gsm_data->tpdata[index] == NULL)
+				{
+					perror("gsm_data->tpdata的malloc()失败!");
+					exit(0);
+				}
+				src += 2;
+			}
+			else if(gsm_data->merge_flag[0] != tmp)
+			{
+				perror("前后不是同一条短信！");
+				exit(0);
+			}
+			if(gsm_data->tpdcs == GSM_7BIT)
+	        {
+	            gsmstring_byte(src,&tmp,2);
+	            tmp = tmp >> 1;
+	            arr[0] = tmp;
+	            src += 2;
+	            memset(buf,0,MXA_SIZE);
 
+	            length_dst = gsmstring_byte(src,buf,(ntmp * 2 / 8) * 7 - 12);
+	            gsmdecode_7bit(buf,arr+1,length_dst);
+	            memset(gsm_data->tpdata[index],'\0',length_dst);
+	            memcpy(gsm_data->tpdata[index],arr,sizeof(arr));
+	            gsm_data->merge_end++;
+	        }
+	        else if(gsm_data->tpdcs == GSM_8BIT)
+	        {
+	            length_dst = gsmstring_byte(src,buf,(ntmp  - 12));
+	            memset(gsm_data->tpdata[index],0,length_dst);
+	            gsmdecode_8bit(buf,gsm_data->tpdata[index],length_dst);
+	            gsm_data->merge_end++;
+	        }
+	        else if(gsm_data->tpdcs == GSM_UNICODE)
+	        {
+	            length_dst = gsmstring_byte(src,buf,(ntmp * 2 - 12));
+	            memset(gsm_data->tpdata[index],0,length_dst);
+	            gsmdecode_unic(buf,gsm_data->tpdata[index],length_dst);
+	            gsm_data->merge_end++;
+	        }
+		}
+	   	else if(tmp == 0x06)
+	   	{
+	   		src += 6;
+			gsmstring_byte(src,buf,4);
+			if(gsm_data->merge_flag[0] == 0 && gsm_data->merge_flag[1] == 0)
+			{
+			    gsm_data->merge_end = 0;
+				gsm_data->merge_flag[0] = buf[0];
+				gsm_data->merge_flag[1] = buf[1];
+				src += 4;
+				gsmstring_byte(src,&tmp,2);
+				gsm_data->merge_num = tmp;
+				src += 2;
+				gsmstring_byte(src,&index,2);
+				index--;
+				gsm_data->tpdata[index] = (uchar *)malloc(sizeof(uchar)*MXA_SIZE);
+				if(gsm_data->tpdata[index] == NULL)
+				{
+					perror("gsm_data->tpdata的malloc()失败!");
+					exit(0);
+				}
+				src += 2;
+				if(gsm_data->tpdcs == GSM_7BIT)
+                {
+                    memset(buf,0,MXA_SIZE);
+                    length_dst = gsmstring_byte(src,buf,(ntmp * 2 / 8) * 7 - 14);
+                    memset(gsm_data->tpdata[index],'\0',length_dst);
+                    gsmdecode_7bit(buf,gsm_data->tpdata[index],length_dst);
+                    gsm_data->merge_end++;
+                }
+                else if(gsm_data->tpdcs == GSM_8BIT)
+                {
+                    length_dst = gsmstring_byte(src,buf,(ntmp  - 14));
+                    memset(gsm_data->tpdata[index],0,length_dst);
+                    gsmdecode_8bit(buf,gsm_data->tpdata[index],length_dst);
+                    gsm_data->merge_end++;
+                }
+                else if(gsm_data->tpdcs == GSM_UNICODE)
+                {
+                    length_dst = gsmstring_byte(src,buf,(ntmp * 2 - 14));
+                    memset(gsm_data->tpdata[index],0,length_dst);
+                    gsmdecode_unic(buf,gsm_data->tpdata[index],length_dst);
+                    gsm_data->merge_end++;
+                }
+                gsm_data->tplongth += ntmp;
+                return 0;
+            }
+            else if(buf[0] == gsm_data->merge_flag[0] && buf[1] == gsm_data->merge_flag[1])
+            {
+                src += 6;
+                gsmstring_byte(src,&index,2);
+                index--;
+                gsm_data->tpdata[index] = (uchar *)malloc(sizeof(uchar)*MXA_SIZE);
+				if(gsm_data->tpdata[index] == NULL)
+				{
+					perror("gsm_data->tpdata的malloc()失败!");
+					exit(0);
+				}
+                src += 2;
+                if(gsm_data->tpdcs == GSM_7BIT)
+                {
+                    memset(buf,0,MXA_SIZE);
+                    length_dst = gsmstring_byte(src,buf,(ntmp * 2 / 8) * 7 - 14);
+                    memset(gsm_data->tpdata[index],'\0',length_dst);
+                    gsmdecode_7bit(buf,gsm_data->tpdata[index],length_dst);
+                    gsm_data->merge_end++;
+                }
+                else if(gsm_data->tpdcs == GSM_8BIT)
+                {
+                    length_dst = gsmstring_byte(src,buf,(ntmp  - 14));
+                    memset(gsm_data->tpdata[index],0,length_dst);
+                    gsmdecode_8bit(buf,gsm_data->tpdata[index],length_dst);
+                    gsm_data->merge_end++;
+                }
+                else if(gsm_data->tpdcs == GSM_UNICODE)
+                {
+                    length_dst = gsmstring_byte(src,buf,(ntmp * 2 - 14));
+                    memset(gsm_data->tpdata[index],0,length_dst);
+                    gsmdecode_unic(buf,gsm_data->tpdata[index],length_dst);
+                    gsm_data->merge_end++;
+                }
+            }
+			else
+			{
+			    printf("%d,%d\n",buf[0],buf[1]);
+				perror("前后不是同一条短信！");
+				exit(0);
+			}
+	   	}
     }
     else
     {
+    	gsm_data->tpdata[0] = (uchar*)malloc(sizeof(uchar ) * MXA_SIZE);
+    	if(gsm_data->tpdata[tmp] == NULL)
+		{
+			perror("gsm_data->tpdata的malloc()失败!");
+			exit(0);
+		}
+		memset(buf,0,MXA_SIZE);
+		memset(gsm_data->tpdata[0],0,MXA_SIZE);
         if(gsm_data->tpdcs == GSM_7BIT)
         {
-            memset(buf,0,MXA_SIZE);
             length_dst = gsmstring_byte(src,buf,(ntmp * 2 / 8) * 7 );
-            memset(gsm_data->tpdata,0,length_dst);
-            gsmdecode_7bit(buf,gsm_data->tpdata,length_dst);
+            gsmdecode_7bit(buf,gsm_data->tpdata[0],length_dst);
         }
         else if(gsm_data->tpdcs == GSM_8BIT)
         {
             length_dst = gsmstring_byte(src,buf,ntmp);
-            memset(gsm_data->tpdata,0,length_dst);
-            gsmdecode_8bit(buf,gsm_data->tpdata,length_dst);
+            gsmdecode_8bit(buf,gsm_data->tpdata[0],length_dst);
         }
         else if(gsm_data->tpdcs == GSM_UNICODE)
         {
             length_dst = gsmstring_byte(src,buf,(ntmp * 2));
-    //        for(i = 0;i < length_dst;i++)
-	//			printf("%x\n",buf[i]);
-            memset(gsm_data->tpdata,0,length_dst);
-            gsmdecode_unic(buf,gsm_data->tpdata,length_dst);
-   //         printf("%s\n",gsm_data->tpdata);
+            gsmdecode_unic(buf,gsm_data->tpdata[0],length_dst);
         }
     }
+      gsm_data->tplongth += ntmp;
     return 0;
 }
 /********************************
@@ -429,7 +771,7 @@ static void stamp_check(uchar *src, const struct tm *p)
             perror("数据有误，请核对！！\n");
             exit(0);
         }
-        if((p->tm_hour+8) < 0 || (p->tm_hour+8) > 23 )
+        if(((p->tm_hour+8) % 23) < 0 || ((p->tm_hour+8)% 23) > 23 )
         {
             perror("数据有误，请核对！！\n");
             exit(0);
@@ -448,19 +790,19 @@ static void stamp_check(uchar *src, const struct tm *p)
     else
     {
         gsmstring_byte(src+2,&nsrc,2);
-        if(p->tm_mon < conversion(nsrc))
+        if(p->tm_mon+1 < conversion(nsrc))
         {
             perror("数据有误，请核对！！\n");
             exit(0);
         }
-        else if(p->tm_mon > conversion(nsrc))
+        else if(p->tm_mon+1 > conversion(nsrc))
         {
             if(p->tm_mday < 1 || p->tm_mday >31)
             {
                 perror("数据有误，请核对！！\n");
                 exit(0);
             }
-            if((p->tm_hour+8) < 0 || (p->tm_hour+8) > 23 )
+            if(((p->tm_hour+8) % 23) < 0 || ((p->tm_hour+8)% 23) > 23 )
             {
                 perror("数据有误，请核对！！\n");
                 exit(0);
@@ -487,7 +829,7 @@ static void stamp_check(uchar *src, const struct tm *p)
             }
             else if(p->tm_mday > conversion(nsrc))
             {
-                if((p->tm_hour+8) < 0 || (p->tm_hour+8) > 23 )
+                if(((p->tm_hour+8) % 23) < 0 || ((p->tm_hour+8)% 23) > 23 )
                 {
                     perror("数据有误，请核对！！\n");
                     exit(0);
@@ -507,12 +849,12 @@ static void stamp_check(uchar *src, const struct tm *p)
             else
             {
                 gsmstring_byte(src+6,&nsrc,2);
-                if(p->tm_hour < conversion(nsrc))
+                if(((p->tm_hour+8)%23) < conversion(nsrc))
                 {
                     perror("数据有误，请核对！！\n");
                     exit(0);
                 }
-                else if(p->tm_hour > conversion(nsrc))
+                else if(((p->tm_hour+8)%23) > conversion(nsrc))
                 {
                     if(p->tm_min < 0 || p->tm_min > 59)
                     {
@@ -582,13 +924,6 @@ static void gsm_error(uchar *src)
     time(&timep);
     p = gmtime(&timep);
 
-    gsmstring_byte(src+2,&tmp,2);
-    if(tmp != 0x91)
-    {
-         printf("%d\n",__LINE__);
-        perror("数据有误，请核对！！\n");
-        exit(0);
-    }
     gsmstring_byte(src,&tmp,2);
     tmp = (tmp -1) * 2;
     src += (4 + tmp);
@@ -600,19 +935,11 @@ static void gsm_error(uchar *src)
         ntmp += 1;
     src += 2;
     gsmstring_byte(src,&tmp,2);
-//  printf("tmp:%x\n",tmp);
-    if(tmp != 0x91)
-    {
-        printf("%d\n",__LINE__);
-        perror("数据有误，请核对！！\n");
-        exit(0);
-    }
     src += (ntmp+2);
     gsmstring_byte(src,&tmp,2);
 //     printf("tmp:%x\n",tmp);
     if(tmp != 0x00)
     {
-        printf("%d\n",__LINE__);
         perror("数据有误，请核对！！\n");
         exit(0);
     }
@@ -639,9 +966,8 @@ static void gsm_error(uchar *src)
         if(dcs_flag == GSM_7BIT)
         {
             gsmstring_byte(src,&tmp,2);
-            if(tmp < 5)
+            if(tmp < 0x05 || tmp > 0x06)
             {
-                printf("%d\n",__LINE__);
                 perror("数据有误，请核对！！\n");
                 exit(0);
             }
@@ -649,7 +975,6 @@ static void gsm_error(uchar *src)
             ntmp = strlen((const char*)src);
             if(ntmp <= 0)
             {
-                printf("%d\n",__LINE__);
                 perror("数据有误，请核对！！\n");
                 exit(0);
             }
@@ -657,15 +982,20 @@ static void gsm_error(uchar *src)
             gsmstring_byte(src,&tmp,2);
             if(tmp & 0x80)
             {
-                printf("%d\n",__LINE__);
                 perror("数据有误，请核对！！\n");
                 exit(0);
             }
         }
         else if(dcs_flag == GSM_8BIT)
         {
-            ntmp = strlen((const char*)src);
+        	ntmp = strlen((const char*)src);
             if(tmp*2 != ntmp)
+            {
+                perror("数据有误，请核对！！\n");
+                exit(0);
+            }
+        	gsmstring_byte(src,&tmp,2);
+            if(tmp < 0x05 || tmp > 0x06)
             {
                 perror("数据有误，请核对！！\n");
                 exit(0);
@@ -673,10 +1003,14 @@ static void gsm_error(uchar *src)
         }
         else if(dcs_flag == GSM_UNICODE)
         {
-            gsmstring_byte(src,&tmp,2);
-            src += (tmp+1)*2;
             ntmp = strlen((const char*)src);
-            if(ntmp <= 0 ||ntmp & 1 )
+            if(ntmp <= 0 || ntmp & 1 )
+            {
+                perror("数据有误，请核对！！\n");
+                exit(0);
+            }
+            gsmstring_byte(src,&tmp,2);
+            if(tmp < 0x05 || tmp > 0x06)
             {
                 perror("数据有误，请核对！！\n");
                 exit(0);
@@ -715,7 +1049,6 @@ static void gsm_error(uchar *src)
             ntmp = strlen( (const char*)src);
             if(ntmp <= 0 || ntmp & 1)
             {
-                printf("%d\n",__LINE__);
                 perror("数据有误，请核对！！\n");
                 exit(0);
             }
@@ -725,72 +1058,317 @@ static void gsm_error(uchar *src)
 
 int main()
 {
-   gsmtp gsm_data;
-    uchar buf[] = "0891683108200075F1600D91683197701609F7000081400300803123A0050003BF020192CD625237ABE16C381C0C0683C160B11A8E059A16A5D6A2941563B5D1E4F0D985BEE3C761B96BFC6EB372B99C8C056381363C6B513A4D3E9D1B5F33584DBA62B1A1EB1AA3B96238D714EAB2CE5CC65A43B1E109AB492671E393C162B8178CF692E14032994E566B2892CD625237ABE16C381C0C0683C160B11A8E059A16A5D6A2941563B5D1";
-    uchar dst[MXA_SIZE * 2] = {'\0'};
-    gsm_error(buf);
-    memset(&gsm_data,0,sizeof(gsmtp));
-    gsmdecodepdu(buf,&gsm_data);
-    printf("tpdata:%s\n",gsm_data.tpdata);
-
-    printf("rete:%s\n",gsm_data.rete);
-    printf("smsc:%s\n",gsm_data.smsc);
-    printf("tppid:%d\n",gsm_data.tppid);
-    printf("tpdcs:%d\n",gsm_data.tpdcs);
-    printf("tplongth:%d\n",gsm_data.tplongth);
-
-    memset(gsm_data.rete,0,sizeof(gsm_data.rete));
-    memset(gsm_data.smsc,0,sizeof(gsm_data.smsc));
-    strcpy((char *)gsm_data.rete,"8613546874589");
-    strcpy((char *)gsm_data.smsc,"8613546874589");
-    gsmcodepdu(dst,&gsm_data);
-
-    printf("PDU:%s\n",dst);
-   /*     int i;
-    unsigned char *src = "92CD625237ABE1";
-    unsigned char buf[16] = {'\0'};
-    unsigned char arr[16] = {'\0'};
-    gsmstring_byte(src,buf,14);
-    for(i = 0;i < 7; i++)
-        printf("buf:%x\n",buf[i]);
-    gsmdecode_7bit(buf,arr,7);
-    for(i = 0;i < 7; i++)
-        printf("arr:%x\n",arr[i]);
-    printf("%s\n",arr);
-    char buf[5] = {'\0'};
-    char *arr = buf;
-    arr[0] = 1;
-    arr[1] = 0;
-    arr[2] = 0x03;
-    arr[3] = 0x03;
-    arr[4] = 0x03;
-    printf("%c\n",arr[3]);
-    int i;
-
-    char *rete = "8613886215486";
-    char *smsc = "8613569745862";
-    char *data = "helloworld";
+/*    int i;
     gsmtp gsm_data;
-    for(i = 0;i < 16;i++)
+    uchar *arr[10];
+
+    uchar buf1[] ="0891683108200075F16005A10180F60008818061010561238B06080419420301301079FB52A8597D7F514E0D965091CFFF0C603B67094E006B3E900254084F60FF0C731B6233002000640078002E00310030003000380036002E0063006E002F00620078006C006800300035002030115C0A656C76845BA26237FF1A60A85F53524D8D2662374F59989D003100340031002E003500395143FF0C4E0B4E004E2A67087ED3";
+    uchar buf2[] ="0891683108200075F16405A10180F6000881806101056123850608041942030265E54E3A00320030003100385E740030003867080032003765E53002598297005145503C53EF70B951FB00200068007400740070003A002F002F00670064002E00310030003000380036002E0063006E002F0063007A002030023010003051439886526F536183B78D600031003000476D4191CFFF1A0020006800740074";
+    uchar buf3[] ="0891683108200075F16405A10180F600088180610105612345060804194203030070003A002F002F00640078002E00310030003000380036002E0063006E002F0079004A004600760059003300710020301130104E2D56FD79FB52A83011";
+    uchar dst[MXA_SIZE * 4] = {'\0'};
+
+    //gsm_error(buf1);
+    memset(&gsm_data,'\0',sizeof(gsmtp));
+
+    gsmdecodepdu(buf1,&gsm_data);
+    gsmdecodepdu(buf2,&gsm_data);
+    gsmdecodepdu(buf3,&gsm_data);
+    if(gsm_data.merge_num == gsm_data.merge_num)
     {
-        gsm_data.rete[i] = (uchar *)rete[i];
-        gsm_data.smsc[i] = (uchar *)smsc[i];
-        gsm_data.tpdata[i] = (uchar *)data[i];
+        strcat((char*)dst,(const char*)gsm_data.tpdata[0]);
+        strcat((char*)dst,(const char*)gsm_data.tpdata[1]);
+        strcat((char*)dst,(const char*)gsm_data.tpdata[2]);
+        gsm_data.result_data = dst;
     }
-    gsm_data.tppid = 0x00;
-    gsm_data.tpdcs = 0x00;
+    printf("RETE:%s\n",gsm_data.rete);
+    printf("SMSC:%s\n",gsm_data.smsc);
+    printf("TPPID:%d\n",gsm_data.tppid);
+    printf("TPDCS:%d\n",gsm_data.tpdcs);
+    printf("TPLongth:%d\n",gsm_data.tplongth);
+    printf("time:%d-%d-%d,%d-%d-%d,时区:%d\n",gsm_data.timestamp.year+2000,gsm_data.timestamp.mouth,gsm_data.timestamp.day,\
+           gsm_data.timestamp.hour,gsm_data.timestamp.minu,gsm_data.timestamp.sec,gsm_data.timestamp.timz);
+    printf("%s\n",gsm_data.result_data);
+    printf("tpdata:%d\n",strlen((const char*)gsm_data.result_data));
+    for(i = 0;i < gsm_data.merge_num;i++)
+        free(gsm_data.tpdata[i]);
 
 
-    uchar *arr = "你好！";
-    uchar buf[20] = {'\0'};
-    uchar tab[20] = {'\0'};
-	int i;
-    gsmcode_unic(arr,tab,20);
-    for(i = 0;i< 6; i++)
-		  printf("%x\n",tab[i]);
-    gsmdecode_unic(tab,buf,20);
-    printf("buf:%s\n",buf);*/
-    while(1);
+    printf("\n");
+    memset(&gsm_data,0,sizeof(gsm_data));
+    strcpy((char *)gsm_data.rete,"+8613546874589");
+    strcpy((char *)gsm_data.smsc,"+8615685487595");
+    gsm_data.tpdcs = GSM_UNICODE;
+    gsm_data.result_data = dst;
 
+    arr[0] = malloc(sizeof(uchar) * MXA_SIZE*2);
+    memset(arr[0],'\0',MXA_SIZE*2);
+    gsmcodepdu(arr[0],&gsm_data);
+    printf("PDU:%s\n",arr[0]);
+    for( i = 1;i < gsm_data.merge_num;i++)
+    {
+        arr[i] = malloc(sizeof(uchar) * MXA_SIZE*2);
+        memset(arr[i],'\0',MXA_SIZE*2);
+        gsmcodepdu(arr[i],&gsm_data);
+        printf("PDU:%s\n",arr[i]);
+    }
+    for(i = 0;i < gsm_data.merge_num;i++)
+        free(arr[i]);
+    fgets(dst,10,stdin);
+*/
+/*
+    gsmtp gsm_data;
+    uchar *arr[10];
+    printf("\n");
+    memset(&gsm_data,0,sizeof(gsm_data));
+    strcpy((char *)gsm_data.rete,"+8613546874589");
+    strcpy((char *)gsm_data.smsc,"+8615685487595");
+    gsm_data.tpdcs = GSM_7BIT;
+ //   gsm_data.result_data = dst;
+    gsm_data.result_data = "asfkjaslkfhaoishfqoihfapslkhbfaoiehfas";
+    arr[0] = malloc(sizeof(uchar) * MXA_SIZE*2);
+    gsmcodepdu(arr[0],&gsm_data);
+    printf("PDU:%s\n",arr[0]);
+    for(int i = 1;i < gsm_data.merge_num;i++)
+    {
+        arr[i] = malloc(sizeof(uchar) * MXA_SIZE*2);
+        memset(arr[i],'\0',MXA_SIZE*2);
+        gsmcodepdu(arr[i],&gsm_data);
+        printf("PDU:%s\n",arr[i]);
+    }
+    for(i = 0;i < gsm_data.merge_num;i++)
+
+    uchar buf[] ="0891683108100065F9640DA0014698090115F000008170919002302315050003080101A6D420B53A65D96C369BCD3602";
+    uchar arr[256] = {'\0'};
+    gsmtp gsm_data;
+    memset(&gsm_data,'\0',sizeof(gsmtp));
+    gsmdecodepdu(buf,&gsm_data);
+    printf("%s\n",gsm_data.tpdata[0]);
+    printf("RETE:%s\n",gsm_data.rete);
+    printf("SMSC:%s\n",gsm_data.smsc);
+    printf("TPPID:%d\n",gsm_data.tppid);
+    printf("TPDCS:%d\n",gsm_data.tpdcs);
+    printf("TPLongth:%d\n",gsm_data.tplongth);
+    printf("udli_data:%s\n",gsm_data.udli_data);
+    printf("udhi:%d\n",gsm_data.tp_udhi);
+    gsm_data.tp_udhi = 0;
+    gsm_data.result_data = gsm_data.tpdata[0];
+ //   gsmcode_7bit(gsm_data.result_data,arr,strlen(gsm_data.result_data));
+ //   printf("%s\n",arr);
+  //  while(1);
+    printf("gsm_data.result_data%s\n",gsm_data.result_data);
+    gsm_data.merge_end = 0;
+    gsm_data.merge_num = 0;
+    memset(gsm_data.merge_flag,'\0',2);
+    gsm_data.merge_flag[0] = gsm_data.udli_data[1];
+    memcpy(gsm_data.smsc,"+8613414624039",16);
+    memcpy(gsm_data.rete,"+8613883071804",16);
+//    memcpy(arr,gsm_data.smsc,sizeof(gsm_data.smsc));
+ //   memcpy(gsm_data.smsc,gsm_data.rete,sizeof(gsm_data.rete));
+//    memcpy(gsm_data.rete,arr,sizeof(arr));
+
+    printf("RETE:%s\n",gsm_data.rete);
+    printf("SMSC:%s\n",gsm_data.smsc);
+    gsmcodepdu(arr,&gsm_data);
+    printf("arr::%s\n",arr);*/
+
+    int opt = 0;
+    int i = 0;
+    int End = 1;
+    char FlagEed = 0;
+    uchar *DstBuf[10];
+    gsmtp gsm_data;
+    while(End)
+    {
+        printf("1.编码，2.解码，3.退出\n");
+        memset(&gsm_data,0,sizeof(gsm_data));
+        scanf("%d",&opt);
+        switch(opt)
+        {
+            case 1:
+                opt = 0;
+                printf("smsc:\n");
+                fgetc(stdin);
+                fgets((char*)gsm_data.smsc,PHONE_NUM,stdin);
+
+                printf("rete:\n");
+                fgets((char*)gsm_data.rete,PHONE_NUM,stdin);
+                gsm_data.smsc[strlen((const char*)gsm_data.smsc)-1] = '\0';
+                gsm_data.rete[strlen((const char*)gsm_data.rete)-1] = '\0';
+                printf("%s\n",gsm_data.smsc);
+                printf("%s\n",gsm_data.rete);
+                while(End)
+                {
+                    printf("1.7BIT,2.8BIT,3.UCS2,4.Exit\n");
+                    scanf("%d",&opt);
+                    switch(opt)
+                    {
+                        case 1:
+                            gsm_data.tpdcs = GSM_7BIT;
+                            break;
+                        case 2:
+                            gsm_data.tpdcs = GSM_8BIT;
+                            break;
+                        case 3:
+                            gsm_data.tpdcs = GSM_UNICODE;
+                            break;
+                        default:
+                            End = 0;
+                            continue;
+                            break;
+                    }
+                    printf("是否需要带有数据头信息y/n\n");
+                    fgetc(stdin);
+                    scanf("%c", &FlagEed);
+                    if (FlagEed == 'y')
+                    {
+                        gsm_data.tp_udhi = 1;
+                        gsm_data.merge_flag[0] = '5';
+
+                    }
+                    else;
+                    gsm_data.result_data = (uchar *)malloc(sizeof(uchar)* MXA_SIZE*2);
+                    if(gsm_data.result_data == NULL)
+                    {
+                        perror("gsm_data.result_data() malloc is fail!!");
+                        exit(0);
+                    }
+                    printf("请输入短信内容：\n");
+                    fgetc(stdin);
+                    fgets((char*)gsm_data.result_data,MXA_SIZE*8,stdin);
+                    gsm_data.result_data[strlen((const char*)gsm_data.result_data)-1] = '\0';
+                    printf("%s\n",gsm_data.result_data);
+                    DstBuf[0] = (uchar *)malloc(sizeof(uchar) * MXA_SIZE*2);
+                    if(DstBuf[0] == NULL)
+                    {
+                        perror("DstBuf[] malloc is fail!!");
+                        exit(0);
+                    }
+                    memset(DstBuf[0],'\0',MXA_SIZE*2);
+                    gsmcodepdu(DstBuf[0],&gsm_data);
+                    printf("PDU:%s\n",DstBuf[0]);
+                    if(gsm_data.merge_num)
+                    {
+                        for(i = 1;i < gsm_data.merge_num;i++)
+                        {
+
+                            DstBuf[i] = (uchar *)malloc(sizeof(uchar) * MXA_SIZE*2);
+                            if(DstBuf[i] == NULL)
+                            {
+                                perror("DstBuf[] malloc is fail!!");
+                                exit(0);
+                            }
+                            memset(DstBuf[i],'\0',MXA_SIZE*2);
+                            gsmcodepdu(DstBuf[i],&gsm_data);
+                            printf("PDU:%s\n",DstBuf[i]);
+                        }
+                    }
+                    if(gsm_data.merge_num == 0)
+                        gsm_data.merge_num = 1;
+                    for(i = 0;i < gsm_data.merge_num;i++)
+                        free(DstBuf[i]);
+                }
+                i = 0;
+                End = 1;
+            break;
+        case 2:
+            while(1)
+            {
+                printf("请输入需要解码的短信信息\n");
+                DstBuf[i] = (uchar *)malloc(sizeof(uchar) * MXA_SIZE);
+                if(DstBuf[i] == NULL)
+                {
+                    perror("DstBuf[] malloc is fail!!");
+                    exit(0);
+                }
+                memset(DstBuf[i],'\0',MXA_SIZE);
+                fgetc(stdin);
+                fgets((char*)DstBuf[i],MXA_SIZE,stdin);
+
+                DstBuf[i][strlen((const char*)DstBuf[i])-1] = '\0';
+                gsm_error(DstBuf[i]);
+                gsmdecodepdu(DstBuf[i],&gsm_data);
+                printf("是否还需要输入短信y/n\n");
+                scanf("%c",&FlagEed);
+
+                if(FlagEed == 'y')
+                {
+                    i++;
+                    continue;
+                }
+                else
+                    break;
+            }
+            gsm_data.result_data = (uchar *)malloc(sizeof(uchar) * MXA_SIZE*16);
+            if(gsm_data.result_data == NULL)
+            {
+                perror("解码:gsm_data.result_data malloc is fail!!");
+                exit(0);
+            }
+            memset(gsm_data.result_data,'\0',MXA_SIZE*16);
+            if(gsm_data.merge_num != 0)
+                if(gsm_data.merge_num != gsm_data.merge_end)
+                {
+                    printf("解码信息不完整，是否打印！y/n\n");
+                    fgetc(stdin);
+                    scanf("%c",&FlagEed);
+                    if(FlagEed == 'y')
+                    {
+                        for(i = 0;i < gsm_data.merge_end;i++)
+                            strcat((char*)gsm_data.result_data,(const char*)gsm_data.tpdata[i]);
+                        printf("**********************************\n");
+                        if(gsm_data.pdu_mti == 0)
+                        {
+                            printf("这是一条接受的信息。\n");
+                            printf("Time:%d-%d-%d,%d-%d-%d,时区:%d\n",gsm_data.timestamp.year+2000,gsm_data.timestamp.mouth,gsm_data.timestamp.day,\
+                                                                    gsm_data.timestamp.hour,gsm_data.timestamp.minu,gsm_data.timestamp.sec,gsm_data.timestamp.timz);
+                        }
+                        else
+                             printf("这是一条发送的信息。\n");
+                        printf("RETE:%s\n",gsm_data.rete);
+                        printf("SMSC:%s\n",gsm_data.smsc);
+                        printf("Content:%s\n",gsm_data.result_data);
+                        printf("**********************************\n");
+                        for(i = 0;i < gsm_data.merge_end;i++)
+                            free(gsm_data.tpdata[i]);
+                        free(gsm_data.result_data);
+                        i = 0;
+                        End = 1;
+                        break;
+                    }
+                    else{
+                        perror("解码信息不完整，请查证！！已退出\n");
+                        exit(0);
+                    }
+                }
+            if(gsm_data.merge_num == 0)
+                gsm_data.merge_num = 1;
+            for(i = 0;i < gsm_data.merge_num;i++)
+                strcat((char*)gsm_data.result_data,(const char*)gsm_data.tpdata[i]);
+            printf("**********************************\n");
+
+            if(gsm_data.pdu_mti == 0)
+            {
+                printf("这是一条接受的信息。\n");
+                printf("Time:%d-%d-%d,%d-%d-%d,时区:%d\n",gsm_data.timestamp.year+2000,gsm_data.timestamp.mouth,gsm_data.timestamp.day,\
+                                                                    gsm_data.timestamp.hour,gsm_data.timestamp.minu,gsm_data.timestamp.sec,gsm_data.timestamp.timz);
+            }
+            else
+                printf("这是一条发送的信息。\n");
+            printf("RETE:%s\n",gsm_data.rete);
+            printf("SMSC:%s\n",gsm_data.smsc);
+            printf("Content:%s\n",gsm_data.result_data);
+            printf("**********************************\n");
+            for(i = 0;i < gsm_data.merge_num;i++)
+                free(gsm_data.tpdata[i]);
+            free(gsm_data.result_data);
+            i = 0;
+            End = 1;
+            break;
+        default:
+            End = 0;
+            continue;
+            break;
+        }
+    }
     return 0;
 }

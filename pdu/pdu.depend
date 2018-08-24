@@ -1,8 +1,8 @@
 # depslib dependency file v1.0
-1534402837 source:c:\users\administrator\desktop\vs\pdu\main.c
+1535079761 source:c:\users\administrator\desktop\vs\pdu\main.c
 	"main.h"
 
-1534398060 c:\users\administrator\desktop\vs\pdu\main.h
+1535073576 c:\users\administrator\desktop\vs\pdu\main.h
 	<stdio.h>
 	<stdlib.h>
 	<stddef.h>
