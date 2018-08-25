@@ -1,0 +1,11 @@
+# depslib dependency file v1.0
+1534465063 source:c:\users\administrator\desktop\vs\sole\main.c
+	<stdio.h>
+	<stdlib.h>
+	<string.h>
+	<conio.h>
+	<windows.h>
+	"main.h"
+
+1534464846 c:\users\administrator\desktop\vs\sole\main.h
+
