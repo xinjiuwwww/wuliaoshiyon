@@ -1,26 +1,12 @@
 # depslib dependency file v1.0
-1535189498 source:c:\users\administrator\desktop\vs\pdu\main.c
+1536305213 source:c:\users\administrator\desktop\vs\pdu\main.c
 	"main.h"
 
-1535185979 c:\users\administrator\desktop\vs\pdu\main.h
+1536305226 c:\users\administrator\desktop\vs\pdu\main.h
 	<stdio.h>
 	<stdlib.h>
 	<stddef.h>
 	<string.h>
-	<windows.h>
-	<wchar.h>
-	<time.h>
-	<locale.h>
-
-1535189566 source:c:\users\administrator\repository\pdu\main.c
-	"main.h"
-
-1535185979 c:\users\administrator\repository\pdu\main.h
-	<stdio.h>
-	<stdlib.h>
-	<stddef.h>
-	<string.h>
-	<windows.h>
 	<wchar.h>
 	<time.h>
 	<locale.h>

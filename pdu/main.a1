@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<analyzerinfo checksum="2370690269">
+        <error id="syntaxError" severity="error" msg="syntax error" verbose="syntax error">
+            <location file0="C:\Users\Administrator\Desktop\vs\pdu\main.c" file="C:\Users\Administrator\Desktop\vs\pdu\main.c" line="3"/>
+        </error>
+</analyzerinfo>
